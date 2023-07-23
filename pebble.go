@@ -6,7 +6,11 @@ package db
 import (
 	"bytes"
 	"fmt"
+	"os"
+	"os/signal"
 	"path/filepath"
+	"strings"
+	"syscall"
 
 	"github.com/cockroachdb/pebble"
 )
@@ -60,6 +64,7 @@ func init() {
 	registerDBCreator(PebbleDBBackend, dbCreator, false)
 
 	if ForceSync == "1" || os.Getenv("PEBBLEDB_FORCESYNC") == "1" {
+		fmt.Println("[Pebble] PEBBLEDB_FORCESYNC = 1")
 		isForceSync = true
 	}
 }
@@ -80,13 +85,71 @@ func NewPebbleDB(name string, dir string) (*PebbleDB, error) {
 func NewPebbleDBWithOpts(name string, dir string, opts *pebble.Options) (*PebbleDB, error) {
 	dbPath := filepath.Join(dir, name+".db")
 	opts.EnsureDefaults()
+	fmt.Println("[Pebble] Open ", dbPath)
 	p, err := pebble.Open(dbPath, opts)
 	if err != nil {
 		return nil, err
 	}
+
+	go WatchSignals(p, dbPath)
+
 	return &PebbleDB{
 		db: p,
 	}, err
+}
+
+func WatchSignals(p *pebble.DB, dbPath string) {
+	signalChannel := make(chan os.Signal, 2)
+	signal.Notify(signalChannel, os.Interrupt, syscall.SIGTERM, syscall.SIGUSR1, syscall.SIGUSR2)
+	sig := <-signalChannel
+	switch sig {
+	case os.Interrupt:
+		fmt.Println("[Pebble] Interrupt Signal - Flush to Disk and Close DB", dbPath)
+		isForceSync = true            // New Writes should ForceSync
+		FlushPebble(p, dbPath, false) // not all go routines stop using the database.  Flush but do not close to avoid panic
+	case syscall.SIGTERM:
+		fmt.Println("[Pebble] SIGTERM - Flush to Disk and Close DB", dbPath)
+		isForceSync = true            // New Writes should ForceSync
+		FlushPebble(p, dbPath, false) // not all go routines stop using the database.  Flush but do not close to avoid panic
+	case syscall.SIGUSR1:
+		fmt.Println("[Pebble] SIGUSR1 - Only Flush To Disk", dbPath)
+		FlushPebble(p, dbPath, false)
+		go WatchSignals(p, dbPath)
+	case syscall.SIGUSR2:
+		fmt.Println("[Pebble] SIGUSR2 - ForceSync = 1, Continue Running", dbPath)
+		isForceSync = true // New Writes should ForceSync
+		FlushPebble(p, dbPath, false)
+		go WatchSignals(p, dbPath)
+	}
+}
+
+func FlushPebble(p *pebble.DB, dbPath string, closeDb bool) {
+	fmt.Println("[Pebble] Flushing DB", dbPath)
+	if err := p.Flush(); err != nil {
+		fmt.Println("[Pebble] Flush Error", err)
+	}
+	fmt.Println("[Pebble] Flushed", dbPath)
+	// Tendermint/CometBFT Closes node/OnStop()
+	if strings.HasSuffix(dbPath, "blockstore.db") {
+		fmt.Println("[Pebble] Skip AutoClose", dbPath)
+		closeDb = false
+	}
+	if strings.HasSuffix(dbPath, "state.db") {
+		fmt.Println("[Pebble] Skip AutoClose", dbPath)
+		closeDb = false
+	}
+	if closeDb == true {
+		fmt.Println("[Pebble] Closing DB", dbPath)
+		defer func() {
+			if err := recover(); err != nil {
+				fmt.Println("[Pebble] panic occurred during close:", err, dbPath)
+			}
+		}()
+		if err := p.Close(); err != nil {
+			fmt.Println("[Pebble] Close Error", err)
+		}
+		fmt.Println("[Pebble] Closed", dbPath)
+	}
 }
 
 // Get implements DB.
