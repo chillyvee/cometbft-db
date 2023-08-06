@@ -103,14 +103,16 @@ func WatchSignals(p *pebble.DB, dbPath string) {
 	signal.Notify(signalChannel, os.Interrupt, syscall.SIGTERM, syscall.SIGUSR1, syscall.SIGUSR2)
 	sig := <-signalChannel
 	switch sig {
-	case os.Interrupt:
-		fmt.Println("[Pebble] Interrupt Signal - Flush to Disk and Close DB", dbPath)
-		isForceSync = true            // New Writes should ForceSync
-		FlushPebble(p, dbPath, false) // not all go routines stop using the database.  Flush but do not close to avoid panic
-	case syscall.SIGTERM:
-		fmt.Println("[Pebble] SIGTERM - Flush to Disk and Close DB", dbPath)
-		isForceSync = true            // New Writes should ForceSync
-		FlushPebble(p, dbPath, false) // not all go routines stop using the database.  Flush but do not close to avoid panic
+	/*
+		case os.Interrupt:
+			fmt.Println("[Pebble] Interrupt Signal - Flush to Disk and Close DB", dbPath)
+			isForceSync = true            // New Writes should ForceSync
+			FlushPebble(p, dbPath, false) // not all go routines stop using the database.  Flush but do not close to avoid panic
+		case syscall.SIGTERM:
+			fmt.Println("[Pebble] SIGTERM - Flush to Disk and Close DB", dbPath)
+			isForceSync = true            // New Writes should ForceSync
+			FlushPebble(p, dbPath, false) // not all go routines stop using the database.  Flush but do not close to avoid panic
+	*/
 	case syscall.SIGUSR1:
 		fmt.Println("[Pebble] SIGUSR1 - Only Flush To Disk", dbPath)
 		FlushPebble(p, dbPath, false)
@@ -260,7 +262,7 @@ func (db *PebbleDB) DB() *pebble.DB {
 
 // Close implements DB.
 func (db PebbleDB) Close() error {
-	//fmt.Println("PebbleDB.Close")
+	fmt.Println("PebbleDB.Close")
 	db.db.Close()
 	return nil
 }

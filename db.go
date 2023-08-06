@@ -56,6 +56,7 @@ func registerDBCreator(backend BackendType, creator dbCreator, force bool) {
 
 // NewDB creates a new database of type backend with the given name.
 func NewDB(name string, backend BackendType, dir string) (DB, error) {
+	fmt.Printf("************************** peb.NewDB %s %v %s\n", name, backend, dir)
 	dbCreator, ok := backends[backend]
 	if !ok {
 		keys := make([]string, 0, len(backends))
